@@ -161,8 +161,11 @@ func main() {
 		fmt.Println(printer.GetTiDBInfo())
 		os.Exit(0)
 	}
+	// 注册store
 	registerStores()
+	// 注册prometheus监控项
 	registerMetrics()
+	// 设置全局 config
 	config.InitializeConfig(*configPath, *configCheck, *configStrict, overrideConfig)
 	if config.GetGlobalConfig().OOMUseTmpStorage {
 		config.GetGlobalConfig().UpdateTempStoragePath()
@@ -171,15 +174,22 @@ func main() {
 		checkTempStorageQuota()
 	}
 	setGlobalVars()
+	// 设置CPU亲和性
 	setCPUAffinity()
+	//配置系统log
 	setupLog()
+	// 定时检测堆内存有没有超标
 	setHeapProfileTracker()
+	//注册分布式系统追踪链 jaeger
 	setupTracing() // Should before createServer and after setup config.
 	printInfo()
+	// 设置binlog信息
 	setupBinlogClient()
+	// 配置监控
 	setupMetrics()
 
 	storage, dom := createStoreAndDomain()
+	// 创建TiDB server
 	svr := createServer(storage, dom)
 
 	exited := make(chan struct{})
@@ -189,6 +199,7 @@ func main() {
 		close(exited)
 	})
 	topsql.SetupTopSQL()
+	// 设置优雅关机
 	terror.MustNil(svr.Run())
 	<-exited
 	syncLog()
@@ -248,7 +259,9 @@ func setCPUAffinity() {
 
 func setHeapProfileTracker() {
 	c := config.GetGlobalConfig()
+	// 默认1分钟
 	d := parseDuration(c.Performance.MemProfileInterval)
+	// 异步运行
 	go profile.HeapProfileForGlobalMemTracker(d)
 }
 

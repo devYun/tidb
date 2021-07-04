@@ -26,6 +26,7 @@ var col = &Collector{}
 // HeapProfileForGlobalMemTracker record heap profile data into each global function memory tracker
 func HeapProfileForGlobalMemTracker(d time.Duration) {
 	log.Info("Mem Profile Tracker started")
+	// 设置ticker为1分钟
 	t := time.NewTicker(d)
 	defer t.Stop()
 	for {
@@ -38,6 +39,7 @@ func HeapProfileForGlobalMemTracker(d time.Duration) {
 }
 
 func heapProfileForGlobalMemTracker() error {
+	// 调用 pprof 获取堆内存使用情况
 	bytes, err := col.getFuncMemUsage(kvcache.ProfileName)
 	if err != nil {
 		return err
@@ -47,6 +49,7 @@ func heapProfileForGlobalMemTracker() error {
 			log.Error("GlobalLRUMemUsageTracker meet panic", zap.Any("panic", p), zap.Stack("stack"))
 		}
 	}()
+	// 将内存放置到 cache 里
 	kvcache.GlobalLRUMemUsageTracker.ReplaceBytesUsed(bytes)
 	return nil
 }
