@@ -120,7 +120,7 @@ func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 	}
 
 	sctx.PrepareTSFuture(ctx)
-
+	// 逻辑优化
 	bestPlan, names, _, err := optimize(ctx, sctx, node, is)
 	if err != nil {
 		return nil, nil, err
@@ -226,11 +226,13 @@ func optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 	sctx.GetSessionVars().PlanColumnID = 0
 	hintProcessor := &hint.BlockHintProcessor{Ctx: sctx}
 	node.Accept(hintProcessor)
+	// 初始化 PlanBuilder
 	builder, _ := plannercore.NewPlanBuilder(sctx, is, hintProcessor)
 
 	// reset fields about rewrite
 	sctx.GetSessionVars().RewritePhaseInfo.Reset()
 	beginRewrite := time.Now()
+	// 构建执行计划
 	p, err := builder.Build(ctx, node)
 	if err != nil {
 		return nil, nil, 0, err
@@ -285,6 +287,7 @@ func optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 	}
 
 	beginOpt := time.Now()
+	//  logical plan & physical plan
 	finalPlan, cost, err := plannercore.DoOptimize(ctx, sctx, builder.GetOptFlag(), logic)
 	sctx.GetSessionVars().DurationOptimization = time.Since(beginOpt)
 	return finalPlan, names, cost, err

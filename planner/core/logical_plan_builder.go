@@ -303,6 +303,7 @@ func (b *PlanBuilder) buildAggregation(ctx context.Context, p LogicalPlan, aggFu
 }
 
 func (b *PlanBuilder) buildTableRefs(ctx context.Context, from *ast.TableRefsClause) (p LogicalPlan, err error) {
+	// 如果没有 from,那么默认使用dual表
 	if from == nil {
 		p = b.buildTableDual()
 		return
@@ -355,6 +356,7 @@ func (b *PlanBuilder) buildResultSetNode(ctx context.Context, node ast.ResultSet
 		}
 		// Duplicate column name in one table is not allowed.
 		// "select * from (select 1, 1) as a;" is duplicate
+		// 重复列校验
 		dupNames := make(map[string]struct{}, len(p.Schema().Columns))
 		for _, name := range p.OutputNames() {
 			colName := name.ColName.O
@@ -3374,6 +3376,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	)
 
 	// set for update read to true before building result set node
+	// 判断是否是更新读
 	if isForUpdateReadSelectLock(sel.LockInfo) {
 		b.isForUpdateRead = true
 	}
@@ -3392,6 +3395,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	// For sub-queries, the FROM clause may have already been built in outer query when resolving correlated aggregates.
 	// If the ResultSetNode inside FROM clause has nothing to do with correlated aggregates, we can simply get the
 	// existing ResultSetNode from the cache.
+	// 构建 DataSource 作为 logic plan，
 	p, err = b.buildTableRefs(ctx, sel.From)
 	if err != nil {
 		return nil, err
@@ -3412,7 +3416,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 			return nil, err
 		}
 	}
-
+	// 校验是否是严格模式
 	if b.ctx.GetSessionVars().SQLMode.HasOnlyFullGroupBy() && sel.From != nil {
 		err = b.checkOnlyFullGroupBy(p, sel)
 		if err != nil {
@@ -3508,6 +3512,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	var oldLen int
 	// According to https://dev.mysql.com/doc/refman/8.0/en/window-functions-usage.html,
 	// we can only process window functions after having clause, so `considerWindow` is false now.
+	// 这里 Projection 封装的是对应 sql中用到的字段
 	p, projExprs, oldLen, err = b.buildProjection(ctx, p, sel.Fields.Fields, totalMap, nil, false, sel.OrderBy != nil)
 	if err != nil {
 		return nil, err
@@ -3760,33 +3765,32 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 		}
 		dbName = model.NewCIStr(sessionVars.CurrentDB)
 	}
-
+	// 根据表名从缓存中获取表的元数据
 	tbl, err := b.is.TableByName(dbName, tn.Name)
 	if err != nil {
 		return nil, err
 	}
-
 	tableInfo := tbl.Meta()
 	var authErr error
 	if sessionVars.User != nil {
 		authErr = ErrTableaccessDenied.FastGenByArgs("SELECT", sessionVars.User.AuthUsername, sessionVars.User.AuthHostname, tableInfo.Name.L)
 	}
 	b.visitInfo = appendVisitInfo(b.visitInfo, mysql.SelectPriv, dbName.L, tableInfo.Name.L, "", authErr)
-
+	//校验是否是 virtual table
 	if tbl.Type().IsVirtualTable() {
 		if tn.TableSample != nil {
 			return nil, expression.ErrInvalidTableSample.GenWithStackByArgs("Unsupported TABLESAMPLE in virtual tables")
 		}
 		return b.buildMemTable(ctx, dbName, tableInfo)
 	}
-
+	// 校验是否是一个视图
 	if tableInfo.IsView() {
 		if tn.TableSample != nil {
 			return nil, expression.ErrInvalidTableSample.GenWithStackByArgs("Unsupported TABLESAMPLE in views")
 		}
 		return b.BuildDataSourceFromView(ctx, dbName, tableInfo)
 	}
-
+	// 校验该表是否是一个序列对象
 	if tableInfo.IsSequence() {
 		if tn.TableSample != nil {
 			return nil, expression.ErrInvalidTableSample.GenWithStackByArgs("Unsupported TABLESAMPLE in sequences")
@@ -3794,7 +3798,7 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 		// When the source is a Sequence, we convert it to a TableDual, as what most databases do.
 		return b.buildTableDual(), nil
 	}
-
+	// 校验是否有分区
 	if tableInfo.GetPartitionInfo() != nil {
 		// Use the new partition implementation, clean up the code here when it's full implemented.
 		if !b.ctx.GetSessionVars().UseDynamicPartitionPrune() {
@@ -3823,6 +3827,7 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 	if tblName.L == "" {
 		tblName = tn.Name
 	}
+	// 这里应该是获取的可能会用到的索引
 	possiblePaths, err := getPossibleAccessPaths(b.ctx, b.TableHints(), tn.IndexHints, tbl, dbName, tblName, b.isForUpdateRead, b.is.SchemaMetaVersion())
 	if err != nil {
 		return nil, err

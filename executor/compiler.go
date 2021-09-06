@@ -53,11 +53,13 @@ func (c *Compiler) Compile(ctx context.Context, stmtNode ast.StmtNode) (*ExecStm
 	}
 
 	ret := &plannercore.PreprocessorReturn{}
+
 	if err := plannercore.Preprocess(c.Ctx, stmtNode, plannercore.WithPreprocessorReturn(ret)); err != nil {
 		return nil, err
 	}
+	// 设置默认limit
 	stmtNode = plannercore.TryAddExtraLimit(c.Ctx, stmtNode)
-
+	// 制定查询计划
 	finalPlan, names, err := planner.Optimize(ctx, c.Ctx, stmtNode, ret.InfoSchema)
 	if err != nil {
 		return nil, err

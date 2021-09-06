@@ -672,11 +672,15 @@ func closeDomainAndStorage(storage kv.Storage, dom *domain.Domain) {
 }
 
 func cleanup(svr *server.Server, storage kv.Storage, dom *domain.Domain, graceful bool) {
+	// 是否是优雅停机
 	if graceful {
+		//优雅停机
 		svr.GracefulDown(context.Background(), nil)
 	} else {
+		// 尝试优雅停机
 		svr.TryGracefulDown()
 	}
+	// 清理所有插件资源
 	plugin.Shutdown(context.Background())
 	closeDomainAndStorage(storage, dom)
 	disk.CleanUp()

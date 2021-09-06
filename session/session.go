@@ -1284,7 +1284,7 @@ func (s *session) Execute(ctx context.Context, sql string) (recordSets []sqlexec
 		ctx = opentracing.ContextWithSpan(ctx, span1)
 		logutil.Eventf(ctx, "execute: %s", sql)
 	}
-
+	// sql解析，转换成AST树
 	stmtNodes, err := s.Parse(ctx, sql)
 	if err != nil {
 		return nil, err
@@ -1495,6 +1495,7 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 	}
 
 	s.PrepareTxnCtx(ctx)
+	// 加载全局变量
 	err := s.loadCommonGlobalVariablesIfNeeded()
 	if err != nil {
 		return nil, err
@@ -1523,6 +1524,7 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 
 	// Transform abstract syntax tree to a physical plan(stored in executor.ExecStmt).
 	compiler := executor.Compiler{Ctx: s}
+	// 制定查询计划以及优化
 	stmt, err := compiler.Compile(ctx, stmtNode)
 	if err != nil {
 		s.rollbackOnError(ctx)

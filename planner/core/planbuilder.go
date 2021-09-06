@@ -649,6 +649,7 @@ func (b *PlanBuilder) Build(ctx context.Context, node ast.Node) (Plan, error) {
 	case *ast.PrepareStmt:
 		return b.buildPrepare(x), nil
 	case *ast.SelectStmt:
+		// select-into 语法处理
 		if x.SelectIntoOpt != nil {
 			return b.buildSelectInto(ctx, x)
 		}
@@ -2731,8 +2732,10 @@ func (b *PlanBuilder) buildInsert(ctx context.Context, insert *ast.InsertStmt) (
 	// `REPLACE INTO` requires both INSERT + DELETE privilege
 	// `ON DUPLICATE KEY UPDATE` requires both INSERT + UPDATE privilege
 	var extraPriv mysql.PrivilegeType
+	// 对应 REPLACE INTO 语法
 	if insert.IsReplace {
 		extraPriv = mysql.DeletePriv
+		// 对应 ON DUPLICATE KEY UPDATE 语法
 	} else if insert.OnDuplicate != nil {
 		extraPriv = mysql.UpdatePriv
 	}

@@ -827,9 +827,11 @@ func (cc *clientConn) Run(ctx context.Context) {
 
 		cc.alloc.Reset()
 		// close connection when idle time is more than wait_timeout
+		// 设置空闲连接等待超时时间
 		waitTimeout := cc.getSessionVarsWaitTimeout(ctx)
 		cc.pkt.setReadTimeout(time.Duration(waitTimeout) * time.Second)
 		start := time.Now()
+		// 读取数据
 		data, err := cc.readPacket()
 		if err != nil {
 			if terror.ErrorNotEqual(err, io.EOF) {
@@ -857,6 +859,7 @@ func (cc *clientConn) Run(ctx context.Context) {
 		}
 
 		startTime := time.Now()
+		// 做任务分发
 		if err = cc.dispatch(ctx, data); err != nil {
 			if terror.ErrorEqual(err, io.EOF) {
 				cc.addMetrics(data[0], startTime, nil)
@@ -1015,7 +1018,9 @@ func (cc *clientConn) dispatch(ctx context.Context, data []byte) error {
 	cc.mu.Unlock()
 
 	cc.lastPacket = data
+	// 执行的命令
 	cmd := data[0]
+	// 命令相应的参数
 	data = data[1:]
 	if variable.TopSQLEnabled() {
 		defer pprof.SetGoroutineLabels(ctx)
@@ -1507,6 +1512,7 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 	defer trace.StartRegion(ctx, "handleQuery").End()
 	sc := cc.ctx.GetSessionVars().StmtCtx
 	prevWarns := sc.GetWarnings()
+	// 构建 AST 抽象语法树
 	stmts, err := cc.ctx.Parse(ctx, sql)
 	if err != nil {
 		metrics.ExecuteErrorCounter.WithLabelValues(metrics.ExecuteErrorToLabel(err)).Inc()
@@ -1688,6 +1694,7 @@ func (cc *clientConn) handleStmt(ctx context.Context, stmt ast.StmtNode, warns [
 	ctx = context.WithValue(ctx, execdetails.StmtExecDetailKey, &execdetails.StmtExecDetails{})
 	ctx = context.WithValue(ctx, util.ExecDetailsKey, &util.ExecDetails{})
 	reg := trace.StartRegion(ctx, "ExecuteStmt")
+	// 执行
 	rs, err := cc.ctx.ExecuteStmt(ctx, stmt)
 	reg.End()
 	// The session tracker detachment from global tracker is solved in the `rs.Close` in most cases.

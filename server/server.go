@@ -333,10 +333,12 @@ func (s *Server) Run() error {
 	s.reportConfig()
 
 	// Start HTTP API to report tidb info such as TPS.
+	// 配置路由信息
 	if s.cfg.Status.ReportStatus {
 		s.startStatusHTTP()
 	}
 	for {
+		// 监听客户端请求
 		conn, err := s.listener.Accept()
 		if err != nil {
 			if opErr, ok := err.(*net.OpError); ok {
@@ -354,7 +356,7 @@ func (s *Server) Run() error {
 			logutil.BgLogger().Error("accept failed", zap.Error(err))
 			return errors.Trace(err)
 		}
-
+		// 创建connection
 		clientConn := s.newConn(conn)
 
 		err = plugin.ForeachPlugin(plugin.Audit, func(p *plugin.Plugin) error {
@@ -384,7 +386,7 @@ func (s *Server) Run() error {
 			terror.Log(clientConn.Close())
 			continue
 		}
-
+		// 处理connection请求
 		go s.onConn(clientConn)
 	}
 }
@@ -647,13 +649,16 @@ var gracefulCloseConnectionsTimeout = 15 * time.Second
 
 // TryGracefulDown will try to gracefully close all connection first with timeout. if timeout, will close all connection directly.
 func (s *Server) TryGracefulDown() {
+	// 设置一个15秒钟的 context
 	ctx, cancel := context.WithTimeout(context.Background(), gracefulCloseConnectionsTimeout)
 	defer cancel()
 	done := make(chan struct{})
+	// 异步执行优雅关闭
 	go func() {
 		s.GracefulDown(ctx, done)
 	}()
 	select {
+	// context 时间到了则直接全部关闭
 	case <-ctx.Done():
 		s.KillAllConnections()
 	case <-done:
@@ -668,8 +673,9 @@ func (s *Server) GracefulDown(ctx context.Context, done chan struct{}) {
 
 	count := s.ConnectionCount()
 	for i := 0; count > 0; i++ {
+		// 剔除空闲连接
 		s.kickIdleConnection()
-
+		// 计算连接数，连接数为0则跳出循环
 		count = s.ConnectionCount()
 		if count == 0 {
 			break
@@ -678,6 +684,7 @@ func (s *Server) GracefulDown(ctx context.Context, done chan struct{}) {
 		if i%30 == 0 {
 			logutil.Logger(ctx).Info("graceful shutdown...", zap.Int("conn count", count))
 		}
+		// 间隔一秒钟尝试一次
 		ticker := time.After(time.Second)
 		select {
 		case <-ctx.Done():
