@@ -318,9 +318,12 @@ func (b *PlanBuilder) buildTableRefs(ctx context.Context, from *ast.TableRefsCla
 }
 
 func (b *PlanBuilder) buildResultSetNode(ctx context.Context, node ast.ResultSetNode) (p LogicalPlan, err error) {
+	//对传入的节点进行类型校验
 	switch x := node.(type) {
+	// join类型
 	case *ast.Join:
 		return b.buildJoin(ctx, x)
+	// TableSourced 类型
 	case *ast.TableSource:
 		var isTableName bool
 		switch v := x.Source.(type) {
@@ -3934,6 +3937,7 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 	var handleCols HandleCols
 	schema := expression.NewSchema(make([]*expression.Column, 0, len(columns))...)
 	names := make([]*types.FieldName, 0, len(columns))
+	// 添加字段
 	for i, col := range columns {
 		ds.Columns = append(ds.Columns, col.ToInfo())
 		names = append(names, &types.FieldName{
@@ -3952,6 +3956,7 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 			OrigName: names[i].String(),
 			IsHidden: col.Hidden,
 		}
+		// 校验是否是int类型的主键
 		if col.IsPKHandleColumn(tableInfo) {
 			handleCols = &IntHandleCols{col: newCol}
 		}
@@ -3960,6 +3965,7 @@ func (b *PlanBuilder) buildDataSource(ctx context.Context, tn *ast.TableName, as
 	}
 	// We append an extra handle column to the schema when the handle
 	// column is not the primary key of "ds".
+	// 如果没有int 类型的主键，那么则会默认添加一个
 	if handleCols == nil {
 		if tableInfo.IsCommonHandle {
 			primaryIdx := tables.FindPrimaryIndex(tableInfo)

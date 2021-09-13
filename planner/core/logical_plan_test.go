@@ -82,6 +82,8 @@ func (s *testPlanSuite) TestPredicatePushDown(c *C) {
 		stmt, err := s.ParseOneStmt(ca, "", "")
 		c.Assert(err, IsNil, comment)
 		p, _, err := BuildLogicalPlan(ctx, s.ctx, stmt, s.is)
+		s2 := ToString(p)
+		fmt.Println(s2)
 		c.Assert(err, IsNil)
 		p, err = logicalOptimize(context.TODO(), flagPredicatePushDown|flagDecorrelate|flagPrunColumns|flagPrunColumnsAgain, p.(LogicalPlan))
 		c.Assert(err, IsNil)
@@ -614,6 +616,8 @@ func (s *testPlanSuite) TestProjectionEliminator(c *C) {
 		c.Assert(err, IsNil, comment)
 
 		p, _, err := BuildLogicalPlan(ctx, s.ctx, stmt, s.is)
+		s2 := ToString(p)
+		fmt.Println(s2)
 		c.Assert(err, IsNil)
 		p, err = logicalOptimize(context.TODO(), flagBuildKeyInfo|flagPrunColumns|flagPrunColumnsAgain|flagEliminateProjection, p.(LogicalPlan))
 		c.Assert(err, IsNil)

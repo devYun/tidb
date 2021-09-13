@@ -15,8 +15,7 @@ package core
 
 import (
 	"context"
-	"math"
-
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/auth"
@@ -34,6 +33,7 @@ import (
 	utilhint "github.com/pingcap/tidb/util/hint"
 	"github.com/pingcap/tidb/util/set"
 	"go.uber.org/atomic"
+	"math"
 )
 
 // OptimizeAstNode optimizes the query to a physical plan directly.
@@ -138,6 +138,8 @@ func DoOptimize(ctx context.Context, sctx sessionctx.Context, flag uint64, logic
 	if flag&flagPrunColumns > 0 && flag-flagPrunColumns > flagPrunColumns {
 		flag |= flagPrunColumnsAgain
 	}
+
+	// 首先是根据构建好的执行计划执行相应的逻辑优化
 	logic, err := logicalOptimize(ctx, flag, logic)
 	if err != nil {
 		return nil, 0, err
@@ -149,6 +151,7 @@ func DoOptimize(ctx context.Context, sctx sessionctx.Context, flag uint64, logic
 	if planCounter == 0 {
 		planCounter = -1
 	}
+	// 然后进行物理优化
 	physical, cost, err := physicalOptimize(logic, &planCounter)
 	if err != nil {
 		return nil, 0, err
@@ -248,13 +251,14 @@ func physicalOptimize(logic LogicalPlan, planCounter *PlanCounterTp) (PhysicalPl
 	}
 
 	preparePossibleProperties(logic)
-
+	// 用于存放每一个算子对接收到的下层返回数据的要求
 	prop := &property.PhysicalProperty{
 		TaskTp:      property.RootTaskType,
 		ExpectedCnt: math.MaxFloat64,
 	}
 
 	logic.SCtx().GetSessionVars().StmtCtx.TaskMapBakTS = 0
+	// 将逻辑计划转换为物理计划
 	t, _, err := logic.findBestTask(prop, planCounter)
 	if err != nil {
 		return nil, 0, err

@@ -312,6 +312,7 @@ func (p *baseLogicalPlan) findBestTask(prop *property.PhysicalProperty, planCoun
 	var hintWorksWithProp bool
 	// Maybe the plan can satisfy the required property,
 	// so we try to get the task without the enforced sort first.
+	// 返回该逻辑算子下面所有的物理计划
 	plansFitsProp, hintWorksWithProp, err = p.self.exhaustPhysicalPlans(newProp)
 	if err != nil {
 		return nil, 0, err
