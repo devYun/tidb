@@ -3379,7 +3379,6 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	)
 
 	// set for update read to true before building result set node
-	// 判断是否是更新读
 	if isForUpdateReadSelectLock(sel.LockInfo) {
 		b.isForUpdateRead = true
 	}
@@ -3414,6 +3413,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	}
 
 	if sel.GroupBy != nil {
+		// 封装 group by 执行计划
 		p, gbyCols, err = b.resolveGbyExprs(ctx, p, sel.GroupBy, sel.Fields.Fields)
 		if err != nil {
 			return nil, err
@@ -3467,6 +3467,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	b.allNames = append(b.allNames, p.OutputNames())
 	defer func() { b.allNames = b.allNames[:len(b.allNames)-1] }()
 
+	// 通过查询条件构建 Logical Selection
 	if sel.Where != nil {
 		p, err = b.buildSelection(ctx, p, sel.Where, nil)
 		if err != nil {
@@ -3485,7 +3486,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	}
 	b.handleHelper.popMap()
 	b.handleHelper.pushMap(nil)
-
+	// 监测是否有聚合函数
 	hasAgg := b.detectSelectAgg(sel)
 	needBuildAgg := hasAgg
 	if hasAgg {
@@ -3501,6 +3502,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 			needBuildAgg = false
 		}
 	}
+	// 构建 LogicalAggregation 算子
 	if needBuildAgg {
 		var aggIndexMap map[int]int
 		p, aggIndexMap, err = b.buildAggregation(ctx, p, aggFuncs, gbyCols, correlatedAggMap)
@@ -3520,7 +3522,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 	if err != nil {
 		return nil, err
 	}
-
+	// 构建 having 条件
 	if sel.Having != nil {
 		b.curClause = havingClause
 		p, err = b.buildSelection(ctx, p, sel.Having.Expr, havingMap)
@@ -3567,7 +3569,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 			return nil, err
 		}
 	}
-
+	// 构建 LogicalSort 算子
 	if sel.OrderBy != nil {
 		if b.ctx.GetSessionVars().SQLMode.HasOnlyFullGroupBy() {
 			p, err = b.buildSortWithCheck(ctx, p, sel.OrderBy.Items, orderMap, windowMapper, projExprs, oldLen, sel.Distinct)
@@ -3578,7 +3580,7 @@ func (b *PlanBuilder) buildSelect(ctx context.Context, sel *ast.SelectStmt) (p L
 			return nil, err
 		}
 	}
-
+	// 构建 LogicalLimit 算子
 	if sel.Limit != nil {
 		p, err = b.buildLimit(p, sel.Limit)
 		if err != nil {
