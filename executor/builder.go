@@ -640,6 +640,7 @@ func (b *executorBuilder) buildSelectLock(v *plannercore.PhysicalLock) Executor 
 }
 
 func (b *executorBuilder) buildLimit(v *plannercore.PhysicalLimit) Executor {
+	// 获取子计划的Executor
 	childExec := b.build(v.Children()[0])
 	if b.err != nil {
 		return nil
@@ -647,6 +648,7 @@ func (b *executorBuilder) buildLimit(v *plannercore.PhysicalLimit) Executor {
 	n := int(mathutil.MinUint64(v.Count, uint64(b.ctx.GetSessionVars().MaxChunkSize)))
 	base := newBaseExecutor(b.ctx, v.Schema(), v.ID(), childExec)
 	base.initCap = n
+	// 构建 limit executor
 	e := &LimitExec{
 		baseExecutor: base,
 		begin:        v.Offset,
@@ -2764,20 +2766,23 @@ func (b *executorBuilder) buildTableReader(v *plannercore.PhysicalTableReader) E
 			failpoint.Return(nil)
 		}
 	})
+	// 使用MPP构建执行者
+	// https://pingcap.com/zh/blog/mpp-smp-tidb
 	if useMPPExecution(b.ctx, v) {
 		return b.buildMPPGather(v)
 	}
+	// 先构建一个无范围的TableReaderExecutor
 	ret, err := buildNoRangeTableReader(b, v)
 	if err != nil {
 		b.err = err
 		return nil
 	}
-
+	// 通过遍历执行计划来更新TableReaderExecutor范围
 	ts := v.GetTableScan()
 	ret.ranges = ts.Ranges
 	sctx := b.ctx.GetSessionVars().StmtCtx
 	sctx.TableIDs = append(sctx.TableIDs, ts.Table.ID)
-
+	// 如果不使用动态分区进行修建则直接返回
 	if !b.ctx.GetSessionVars().UseDynamicPartitionPrune() {
 		return ret
 	}
@@ -2785,12 +2790,12 @@ func (b *executorBuilder) buildTableReader(v *plannercore.PhysicalTableReader) E
 	if ok, _ := ts.IsPartition(); ok {
 		return ret
 	}
-
+	// 获取分区信息
 	pi := ts.Table.GetPartitionInfo()
 	if pi == nil {
 		return ret
 	}
-
+	// 动态分区修剪
 	tmp, _ := b.is.TableByID(ts.Table.ID)
 	tbl := tmp.(table.PartitionedTable)
 	partitions, err := partitionPruning(b.ctx, tbl, v.PartitionInfo.PruningConds, v.PartitionInfo.PartitionNames, v.PartitionInfo.Columns, v.PartitionInfo.ColumnNames)
@@ -2805,6 +2810,7 @@ func (b *executorBuilder) buildTableReader(v *plannercore.PhysicalTableReader) E
 	if len(partitions) == 0 {
 		return &TableDualExec{baseExecutor: *ret.base()}
 	}
+	// 在执行者中增加数据读取的 KV范围
 	ret.kvRangeBuilder = kvRangeBuilderFromRangeAndPartition{
 		sctx:       b.ctx,
 		partitions: partitions,

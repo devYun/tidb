@@ -1544,6 +1544,10 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 		sessionExecuteCompileDurationGeneral.Observe(durCompile.Seconds())
 	}
 	s.currentPlan = stmt.Plan
+	if strings.Contains(stmt.Text, "student") {
+		toString := plannercore.ToString(stmt.Plan)
+		fmt.Println(toString)
+	}
 
 	// Execute the physical plan.
 	logStmt(stmt, s)
@@ -1648,10 +1652,12 @@ func runStmt(ctx context.Context, se *session, s sqlexec.Statement) (rs sqlexec.
 
 	// Save origTxnCtx here to avoid it reset in the transaction retry.
 	origTxnCtx := sessVars.TxnCtx
+	// 校验用户使用 rollback、commit 这种显示关闭事务的 SQL 中断执行
 	err = se.checkTxnAborted(s)
 	if err != nil {
 		return nil, err
 	}
+	//执行 SQL，并返回 rs  结果集
 	rs, err = s.Exec(ctx)
 	se.updateTelemetryMetric(s.(*executor.ExecStmt))
 	sessVars.TxnCtx.StatementCount++
@@ -1662,7 +1668,7 @@ func runStmt(ctx context.Context, se *session, s sqlexec.Statement) (rs sqlexec.
 			se:        se,
 		}, err
 	}
-
+	//在执行完语句后，检查是否该提交了
 	err = finishStmt(ctx, se, err, s)
 	if se.hasQuerySpecial() {
 		// The special query will be handled later in handleQuerySpecial,

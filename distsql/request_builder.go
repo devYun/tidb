@@ -437,11 +437,14 @@ func SplitRangesAcrossInt64Boundary(ranges []*ranger.Range, keepOrder bool, desc
 		return ranges, nil
 	}
 	idx := sort.Search(len(ranges), func(i int) bool { return ranges[i].HighVal[0].GetUint64() > math.MaxInt64 })
+	// 相等说明没有 val 大于 MaxInt64
 	if idx == len(ranges) {
 		return ranges, nil
 	}
 	if ranges[idx].LowVal[0].GetUint64() > math.MaxInt64 {
+		// 将 ranges 分为两部分，小于等于 MaxInt64 的部分
 		signedRanges := ranges[0:idx]
+		// 大于 MaxInt64 的部分
 		unsignedRanges := ranges[idx:]
 		if !keepOrder {
 			return append(unsignedRanges, signedRanges...), nil
@@ -452,6 +455,7 @@ func SplitRangesAcrossInt64Boundary(ranges []*ranger.Range, keepOrder bool, desc
 		return signedRanges, unsignedRanges
 	}
 	// need to split the range that straddles the int64 boundary
+	// 下面是拆分 range 列表中的某个 range 恰好最大值大于 MaxInt64，但是最小值小于 MaxInt64 的情况
 	signedRanges := make([]*ranger.Range, 0, idx+1)
 	unsignedRanges := make([]*ranger.Range, 0, len(ranges)-idx)
 	signedRanges = append(signedRanges, ranges[0:idx]...)

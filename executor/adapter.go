@@ -376,6 +376,9 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	if sctx.GetSessionVars().StmtCtx.HasMemQuotaHint {
 		sctx.GetSessionVars().StmtCtx.MemTracker.SetBytesLimit(sctx.GetSessionVars().StmtCtx.MemQuotaQuery)
 	}
+	if strings.Contains(a.Text, "student") {
+		fmt.Println(a.Text)
+	}
 	// 生成执行器
 	e, err := a.buildExecutor()
 	if err != nil {
@@ -383,7 +386,7 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	}
 	// ExecuteExec will rewrite `a.Plan`, so set plan label should be executed after `a.buildExecutor`.
 	ctx = a.setPlanLabelForTopSQL(ctx)
-
+	// 根据不同执行者进行不同的处理
 	if err = e.Open(ctx); err != nil {
 		terror.Call(e.Close)
 		return nil, err
@@ -763,6 +766,7 @@ type pessimisticTxn interface {
 func (a *ExecStmt) buildExecutor() (Executor, error) {
 	ctx := a.Ctx
 	stmtCtx := ctx.GetSessionVars().StmtCtx
+	// 判断计划类型如果不是 Execute，则进行一些参数控制
 	if _, ok := a.Plan.(*plannercore.Execute); !ok {
 		if snapshotTS := ctx.GetSessionVars().SnapshotTS; snapshotTS != 0 {
 			if err := ctx.InitTxnWithStartTS(snapshotTS); err != nil {
@@ -791,11 +795,17 @@ func (a *ExecStmt) buildExecutor() (Executor, error) {
 			}
 		}
 	}
+	// 判断计划类型是否为分析并在受限SQL中，进行些参数控制
 	if _, ok := a.Plan.(*plannercore.Analyze); ok && ctx.GetSessionVars().InRestrictedSQL {
 		ctx.GetSessionVars().StmtCtx.Priority = kv.PriorityLow
 	}
-
+	// 新建一个构造者
 	b := newExecutorBuilder(ctx, a.InfoSchema, a.Ti, a.SnapshotTS, a.ExplicitStaleness, a.TxnScope)
+	text := a.Text
+	if strings.Contains(text, "student") {
+		fmt.Println(text)
+	}
+	//根据执行计划构建 Executor
 	e := b.build(a.Plan)
 	if b.err != nil {
 		return nil, errors.Trace(b.err)

@@ -62,6 +62,7 @@ type LocationKeyRanges struct {
 func (c *RegionCache) SplitKeyRangesByLocations(bo *Backoffer, ranges *KeyRanges) ([]*LocationKeyRanges, error) {
 	res := make([]*LocationKeyRanges, 0)
 	for ranges.Len() > 0 {
+		//通过 region cache 找到 range 对应的 region
 		loc, err := c.LocateKey(bo.TiKVBackoffer(), ranges.At(0).StartKey)
 		if err != nil {
 			return res, errors.Trace(err)

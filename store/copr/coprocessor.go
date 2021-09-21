@@ -77,6 +77,7 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, variables interfa
 	ctx = context.WithValue(ctx, tikv.TxnStartKey(), req.StartTs)
 	bo := backoff.NewBackofferWithVars(ctx, copBuildTaskMaxBackoff, vars)
 	ranges := NewKeyRanges(req.KeyRanges)
+	// 根据ranges构建task
 	tasks, err := buildCopTasks(bo, c.store.GetRegionCache(), ranges, req)
 	if err != nil {
 		return copErrorResponse{err}
@@ -158,7 +159,7 @@ func buildCopTasks(bo *Backoffer, cache *RegionCache, ranges *KeyRanges, req *kv
 	}
 
 	rangesLen := ranges.Len()
-
+	//找到有哪些 region 包含了一个 key range 范围内的数据
 	locs, err := cache.SplitKeyRangesByLocations(bo, ranges)
 	if err != nil {
 		return nil, errors.Trace(err)

@@ -139,6 +139,8 @@ func (e *TableReaderExecutor) Open(ctx context.Context) error {
 	e.memTracker.AttachTo(e.ctx.GetSessionVars().StmtCtx.MemTracker)
 
 	var err error
+	// 判断 Filter 中是否有关联列条件
+	// 如果有则构建DAG树中的节点，部分节点可以进行下推，下推到TiKV中执行
 	if e.corColInFilter {
 		if e.storeType == kv.TiFlash {
 			execs, _, err := constructDistExecForTiFlash(e.ctx, e.tablePlan)
@@ -153,10 +155,13 @@ func (e *TableReaderExecutor) Open(ctx context.Context) error {
 			}
 		}
 	}
+	// 运行时状态信息统计，不为空的时候开启执行摘要的收集
 	if e.runtimeStats != nil {
 		collExec := true
 		e.dagPB.CollectExecutionSummaries = &collExec
 	}
+	// 判断 Access 中是否有关联列条件
+	// 存在处理关联条件，重新划分查询范围
 	if e.corColInAccess {
 		ts := e.plans[0].(*plannercore.PhysicalTableScan)
 		e.ranges, err = ts.ResolveCorrelatedColumns()
@@ -193,22 +198,26 @@ func (e *TableReaderExecutor) Open(ctx context.Context) error {
 		}
 		return nil
 	}
-
+	// 将 firstPartRanges 进行执行，请求TiKV并获取返回的结果
 	firstResult, err := e.buildResp(ctx, firstPartRanges)
 	if err != nil {
 		e.feedback.Invalidate()
 		return err
 	}
+	// 当 secondPartRanges 没有时，直接将第一部分结果进行整合
 	if len(secondPartRanges) == 0 {
 		e.resultHandler.open(nil, firstResult)
 		return nil
 	}
+	// 当 secondPartRanges 存在值时，请求TiKV并获取返回的结果
 	var secondResult distsql.SelectResult
+	//发送请求
 	secondResult, err = e.buildResp(ctx, secondPartRanges)
 	if err != nil {
 		e.feedback.Invalidate()
 		return err
 	}
+	// 将两部分的结果进行整合
 	e.resultHandler.open(firstResult, secondResult)
 	return nil
 }
@@ -293,13 +302,13 @@ func (e *TableReaderExecutor) buildResp(ctx context.Context, ranges []*ranger.Ra
 		}
 		return distsql.NewSerialSelectResults(results), nil
 	}
-
+	// build Request
 	kvReq, err := e.buildKVReq(ctx, ranges)
 	if err != nil {
 		return nil, err
 	}
 	e.kvRanges = append(e.kvRanges, kvReq.KeyRanges...)
-
+	// sends a DAG request, returns SelectResult
 	result, err := e.SelectResult(ctx, e.ctx, kvReq, retTypes(e), e.feedback, getPhysicalPlanIDs(e.plans), e.id)
 	if err != nil {
 		return nil, err
