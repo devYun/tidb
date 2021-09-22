@@ -101,7 +101,7 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, variables interfa
 		// Make sure that there is at least one worker.
 		it.concurrency = 1
 	}
-
+	// 设置限流器和传输数据的 channel
 	if it.req.KeepOrder {
 		it.sendRate = util.NewRateLimit(2 * it.concurrency)
 		it.respChan = nil
@@ -166,9 +166,11 @@ func buildCopTasks(bo *Backoffer, cache *RegionCache, ranges *KeyRanges, req *kv
 	}
 
 	var tasks []*copTask
+	//根据返回的 LocationKeyRanges 来构建 task
 	for _, loc := range locs {
 		// TiKV will return gRPC error if the message is too large. So we need to limit the length of the ranges slice
 		// to make sure the message can be sent successfully.
+		// 这里是因为一个 region 里面可能也包含多个 Range
 		rLen := loc.Ranges.Len()
 		for i := 0; i < rLen; {
 			nextI := mathutil.Min(i+rangesPerTask, rLen)
