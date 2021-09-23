@@ -373,13 +373,16 @@ func (worker *copIteratorWorker) run(ctx context.Context) {
 	}()
 	for task := range worker.taskCh {
 		respCh := worker.respChan
+		// 这里是需要排序的时候为空，那么为每个 task 都创建一个 respChan
 		if respCh == nil {
 			respCh = task.respChan
 		}
+		// 发送rpc请求
 		worker.handleTask(ctx, task, respCh)
 		if worker.respChan != nil {
 			// When a task is finished by the worker, send a finCopResp into channel to notify the copIterator that
 			// there is a task finished.
+			// 发送 finCopResp 到 respCh 中，告诉copIterator有一个task已经运行完毕了
 			worker.sendToRespCh(finCopResp, worker.respChan, false)
 		}
 		close(task.respChan)
@@ -399,6 +402,7 @@ func (it *copIterator) open(ctx context.Context, enabledRateLimitAction bool) {
 	taskCh := make(chan *copTask, 1)
 	it.wg.Add(it.concurrency)
 	// Start it.concurrency number of workers to handle cop requests.
+	// 根据并发数创建 worker
 	for i := 0; i < it.concurrency; i++ {
 		worker := &copIteratorWorker{
 			taskCh:          taskCh,
@@ -430,6 +434,7 @@ func (it *copIterator) open(ctx context.Context, enabledRateLimitAction bool) {
 			it.memTracker.Consume(10 * MockResponseSizeForTest)
 		}
 	})
+	// 创建 sender
 	go taskSender.run()
 }
 
@@ -441,15 +446,18 @@ func (sender *copIteratorTaskSender) run() {
 		// We keep the number of inflight tasks within the number of 2 * concurrency when Keep Order is true.
 		// If KeepOrder is false, the number equals the concurrency.
 		// It sends one more task if a task has been finished in copIterator.Next.
+		// 使用限流器控制频率
 		exit := sender.sendRate.GetToken(sender.finishCh)
 		if exit {
 			break
 		}
+		// 发送task到taskCh中
 		exit = sender.sendToTaskCh(t)
 		if exit {
 			break
 		}
 	}
+	//发送完毕之后关闭 channel
 	close(sender.taskCh)
 
 	// Wait for worker goroutines to exit.
