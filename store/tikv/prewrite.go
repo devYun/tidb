@@ -148,18 +148,20 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 			failpoint.Inject("prewriteSecondary", nil) // for other failures like sleep or pause
 		}
 	}
-
+	// 获取事务的大小
 	txnSize := uint64(c.regionTxnSize[batch.region.id])
 	// When we retry because of a region miss, we don't know the transaction size. We set the transaction size here
 	// to MaxUint64 to avoid unexpected "resolve lock lite".
+	// 因为region的缺失导致的重试，所以不知道事务大小，这里重置事务大小为最大值
 	if action.retry {
 		txnSize = math.MaxUint64
 	}
 
 	tBegin := time.Now()
 	attempts := 0
-
+	// 构建 Request
 	req := c.buildPrewriteRequest(batch, txnSize)
+	// 构建 RegionRequestSender
 	sender := NewRegionRequestSender(c.store.regionCache, c.store.GetTiKVClient())
 	defer func() {
 		if err != nil {
@@ -173,22 +175,24 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 		}
 	}()
 	for {
+		//尝试次数
 		attempts++
+		// 如果请求超过了1分钟，那么打印一条日志
 		if time.Since(tBegin) > slowRequestThreshold {
 			logutil.BgLogger().Warn("slow prewrite request", zap.Uint64("startTS", c.startTS), zap.Stringer("region", &batch.region), zap.Int("attempts", attempts))
 			tBegin = time.Now()
 		}
-
+		//发送请求
 		resp, err := sender.SendReq(bo, req, batch.region, client.ReadTimeoutShort)
 		// Unexpected error occurs, return it
 		if err != nil {
 			return errors.Trace(err)
 		}
-
 		regionErr, err := resp.GetRegionError()
 		if err != nil {
 			return errors.Trace(err)
 		}
+		// 如果遇到了regionError， 则需要重新调用doActionOnMutations重新分组，重新尝试
 		if regionErr != nil {
 			// For other region error and the fake region error, backoff because
 			// there's something wrong.
@@ -217,10 +221,12 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 		prewriteResp := resp.Resp.(*pb.PrewriteResponse)
 		keyErrs := prewriteResp.GetErrors()
 		if len(keyErrs) == 0 {
+			//如果没有keyError，并且Batch是primary，则启动一个tllManager
 			if batch.isPrimary {
 				// After writing the primary key, if the size of the transaction is larger than 32M,
 				// start the ttlManager. The ttlManager will be closed in tikvTxn.Commit().
 				// In this case 1PC is not expected to be used, but still check it for safety.
+				// 如果事务大于32M，那么开启ttlManager定时发送TxnHeartBeat心跳
 				if int64(c.txnSize) > config.GetGlobalConfig().TiKVClient.TTLRefreshedTxnSize &&
 					prewriteResp.OnePcCommitTs == 0 {
 					c.run(c, nil)
@@ -285,6 +291,7 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 			}
 
 			// Extract lock from key error
+			// 从 keyErr 中抽取出冲突的lock
 			lock, err1 := extractLockFromKeyErr(keyErr)
 			if err1 != nil {
 				atomic.StoreUint32(&c.prewriteFailed, 1)
@@ -296,6 +303,7 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 			locks = append(locks, lock)
 		}
 		start := time.Now()
+		//尝试解决这些locks
 		msBeforeExpired, err := c.store.lockResolver.resolveLocksForWrite(bo, c.startTS, locks)
 		if err != nil {
 			return errors.Trace(err)

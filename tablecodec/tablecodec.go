@@ -1040,12 +1040,14 @@ func GetIndexKeyBuf(buf []byte, defaultCap int) []byte {
 // GenIndexKey generates index key using input physical table id
 func GenIndexKey(sc *stmtctx.StatementContext, tblInfo *model.TableInfo, idxInfo *model.IndexInfo,
 	phyTblID int64, indexedValues []types.Datum, h kv.Handle, buf []byte) (key []byte, distinct bool, err error) {
+	// 校验是否是唯一键
 	if idxInfo.Unique {
 		// See https://dev.mysql.com/doc/refman/5.7/en/create-index.html
 		// A UNIQUE index creates a constraint such that all values in the index must be distinct.
 		// An error occurs if you try to add a new row with a key value that matches an existing row.
 		// For all engines, a UNIQUE index permits multiple NULL values for columns that can contain NULL.
 		distinct = true
+		// 唯一键是允许 null 值的
 		for _, cv := range indexedValues {
 			if cv.IsNull() {
 				distinct = false
@@ -1055,7 +1057,9 @@ func GenIndexKey(sc *stmtctx.StatementContext, tblInfo *model.TableInfo, idxInfo
 	}
 	// For string columns, indexes can be created using only the leading part of column values,
 	// using col_name(length) syntax to specify an index prefix length.
+	//如果是字符串，那么需要按字段长度裁切
 	TruncateIndexValues(tblInfo, idxInfo, indexedValues)
+	// 按 tablePrefix{tableID}_indexPrefixSep{indexID}_indexedColumnsValue 拼接
 	key = GetIndexKeyBuf(buf, RecordRowKeyLen+len(indexedValues)*9+9)
 	key = appendTableIndexPrefix(key, phyTblID)
 	key = codec.EncodeInt(key, idxInfo.ID)
@@ -1064,6 +1068,7 @@ func GenIndexKey(sc *stmtctx.StatementContext, tblInfo *model.TableInfo, idxInfo
 		return nil, false, err
 	}
 	if !distinct && h != nil {
+		// 如果是非Unique Index 数据，还需要拼接上 rowID
 		if h.IsInt() {
 			key, err = codec.EncodeKey(sc, key, types.NewDatum(h.IntValue()))
 		} else {
@@ -1288,6 +1293,7 @@ func TruncateIndexValue(v *types.Datum, idxCol *model.IndexColumn, tblCol *model
 	if noPrefixIndex {
 		return
 	}
+	// 校验是否是字符串类型
 	notStringType := v.Kind() != types.KindString && v.Kind() != types.KindBytes
 	if notStringType {
 		return

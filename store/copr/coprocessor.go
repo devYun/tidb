@@ -568,6 +568,7 @@ func (it *copIterator) Next(ctx context.Context) (kv.ResultSubset, error) {
 	})
 	// If data order matters, response should be returned in the same order as copTask slice.
 	// Otherwise all responses are returned from a single channel.
+	// 如果数据不需要排序，那么直接从 respChan 中获取数据
 	if it.respChan != nil {
 		// Get next fetched resp from chan
 		resp, ok, closed = it.recvFromRespCh(ctx, it.respChan)
@@ -575,6 +576,7 @@ func (it *copIterator) Next(ctx context.Context) (kv.ResultSubset, error) {
 			it.actionOnExceed.close()
 			return nil, nil
 		}
+		// 表示读到 respChan 最后一个数据
 		if resp == finCopResp {
 			it.actionOnExceed.destroyTokenIfNeeded(func() {
 				it.sendRate.PutToken()
@@ -588,6 +590,7 @@ func (it *copIterator) Next(ctx context.Context) (kv.ResultSubset, error) {
 				it.actionOnExceed.close()
 				return nil, nil
 			}
+			// 如果数据是有序的，那么从 task 的 respChan 获取数据
 			task := it.tasks[it.curr]
 			resp, ok, closed = it.recvFromRespCh(ctx, task.respChan)
 			if closed {

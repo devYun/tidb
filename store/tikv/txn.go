@@ -126,6 +126,7 @@ func newTiKVTxnWithOptions(store *KVStore, options StartTSOption) (*KVTxn, error
 	if options.TxnScope == "" {
 		options.TxnScope = oracle.GlobalTxnScope
 	}
+	// 去PD服务获取一个时间戳
 	startTS, err := ExtractStartTS(store, options)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -324,9 +325,10 @@ func (txn *KVTxn) Commit(ctx context.Context) error {
 	}
 
 	var err error
-	// If the txn use pessimistic lock, committer is initialized.
+	// If the txn use pessimistic lock, committer is initialized. 如果使用乐观锁，那么需要初始化二阶段提交器 twoPhaseCommitter
 	committer := txn.committer
 	if committer == nil {
+		// 构建 twoPhaseCommitter
 		committer, err = newTwoPhaseCommitter(txn, sessionID)
 		if err != nil {
 			return errors.Trace(err)
@@ -336,6 +338,7 @@ func (txn *KVTxn) Commit(ctx context.Context) error {
 	defer committer.ttlManager.close()
 
 	initRegion := trace.StartRegion(ctx, "InitKeys")
+	// buffer 里面的数据转成 mutations
 	err = committer.initKeysAndMutations()
 	initRegion.End()
 	if err != nil {

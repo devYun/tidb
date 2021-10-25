@@ -74,7 +74,7 @@ func updateRecord(ctx context.Context, sctx sessionctx.Context, h kv.Handle, old
 	// 1. Cast modified values.
 	for i, col := range t.Cols() {
 		if modified[i] {
-			// Cast changed fields with respective columns.
+			// Cast changed fields with respective columns. 获取到被更新的值，做一下类型转换
 			v, err := table.CastValue(sctx, newData[i], col.ToInfo(), false, false)
 			if err != nil {
 				return false, err
@@ -96,13 +96,15 @@ func updateRecord(ctx context.Context, sctx sessionctx.Context, h kv.Handle, old
 		collation := newData[i].Collation()
 		// We should use binary collation to compare datum, otherwise the result will be incorrect.
 		newData[i].SetCollation(charset.CollationBin)
+		// 这里是新旧数据进行比较，如果相同返回0
 		cmp, err := newData[i].CompareDatum(sc, &oldData[i])
 		newData[i].SetCollation(collation)
 		if err != nil {
 			return false, err
 		}
+		//这里表明新旧数据不同
 		if cmp != 0 {
-			changed = true
+			changed = true //设置标记位，表示有数据被修改
 			modified[i] = true
 			// Rebase auto increment id if the field is changed.
 			if mysql.HasAutoIncrementFlag(col.Flag) {
@@ -134,7 +136,7 @@ func updateRecord(ctx context.Context, sctx sessionctx.Context, h kv.Handle, old
 	}
 
 	sc.AddTouchedRows(1)
-	// If no changes, nothing to do, return directly.
+	// If no changes, nothing to do, return directly. 如果数据行没有变化，直接返回
 	if !changed {
 		// See https://dev.mysql.com/doc/refman/5.7/en/mysql-real-connect.html  CLIENT_FOUND_ROWS
 		if sctx.GetSessionVars().ClientCapability&mysql.ClientFoundRows > 0 {
@@ -171,6 +173,7 @@ func updateRecord(ctx context.Context, sctx sessionctx.Context, h kv.Handle, old
 	}
 
 	// 5. If handle changed, remove the old then add the new record, otherwise update the record.
+	// 这里如果是主键被更改了，那么会先将原数据删除，再添加一条新的数据
 	if handleChanged {
 		// For `UPDATE IGNORE`/`INSERT IGNORE ON DUPLICATE KEY UPDATE`
 		// we use the staging buffer so that we don't need to precheck the existence of handle or unique keys by sending
@@ -202,6 +205,7 @@ func updateRecord(ctx context.Context, sctx sessionctx.Context, h kv.Handle, old
 		}
 	} else {
 		// Update record to new value and update index.
+		// 更新记录行
 		if err = t.UpdateRecord(ctx, sctx, h, oldData, newData, modified); err != nil {
 			if terr, ok := errors.Cause(err).(*terror.Error); sctx.GetSessionVars().StmtCtx.IgnoreNoPartition && ok && terr.Code() == errno.ErrNoPartitionForGivenValue {
 				return false, nil

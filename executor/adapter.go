@@ -376,7 +376,7 @@ func (a *ExecStmt) Exec(ctx context.Context) (_ sqlexec.RecordSet, err error) {
 	if sctx.GetSessionVars().StmtCtx.HasMemQuotaHint {
 		sctx.GetSessionVars().StmtCtx.MemTracker.SetBytesLimit(sctx.GetSessionVars().StmtCtx.MemQuotaQuery)
 	}
-	if strings.Contains(a.Text, "student") {
+	if strings.Contains(a.Text, "test_insert") {
 		fmt.Println(a.Text)
 	}
 	// 生成执行器

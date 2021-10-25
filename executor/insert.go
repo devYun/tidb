@@ -181,6 +181,7 @@ func prefetchDataCache(ctx context.Context, txn kv.Transaction, rows []toBeCheck
 
 // updateDupRow updates a duplicate row to a new row.
 func (e *InsertExec) updateDupRow(ctx context.Context, idxInBatch int, txn kv.Transaction, row toBeCheckedRow, handle kv.Handle, onDuplicate []*expression.Assignment) error {
+	// 构造key值，获取缓存中原数据，获取不到则返回
 	oldRow, err := getOldRow(ctx, e.ctx, txn, row.t, handle, e.GenExprs)
 	if err != nil {
 		return err
@@ -193,6 +194,7 @@ func (e *InsertExec) updateDupRow(ctx context.Context, idxInBatch int, txn kv.Tr
 
 	err = e.doDupRowUpdate(ctx, handle, oldRow, row.row, e.OnDuplicate)
 	if e.ctx.GetSessionVars().StmtCtx.DupKeyAsWarning && kv.ErrKeyExists.Equal(err) {
+		// 如果冲突，那么添加Warning信息
 		e.ctx.GetSessionVars().StmtCtx.AppendWarning(err)
 		return nil
 	}
@@ -203,6 +205,7 @@ func (e *InsertExec) updateDupRow(ctx context.Context, idxInBatch int, txn kv.Tr
 func (e *InsertExec) batchUpdateDupRows(ctx context.Context, newRows [][]types.Datum) error {
 	// Get keys need to be checked.
 	start := time.Now()
+	// 构造唯一键和主键的key
 	toBeCheckedRows, err := getKeysNeedCheck(ctx, e.ctx, e.Table, newRows)
 	if err != nil {
 		return err
@@ -222,6 +225,7 @@ func (e *InsertExec) batchUpdateDupRows(ctx context.Context, newRows [][]types.D
 	prefetchStart := time.Now()
 	// Use BatchGet to fill cache.
 	// It's an optimization and could be removed without affecting correctness.
+	// 根据key填充对应的缓存
 	if err = prefetchDataCache(ctx, txn, toBeCheckedRows); err != nil {
 		return err
 	}
@@ -234,7 +238,7 @@ func (e *InsertExec) batchUpdateDupRows(ctx context.Context, newRows [][]types.D
 			if err != nil {
 				return err
 			}
-
+			// 根据主键判断是否有冲突，如果有冲突 err 则为 nil
 			err = e.updateDupRow(ctx, i, txn, r, handle, e.OnDuplicate)
 			if err == nil {
 				continue
@@ -243,7 +247,7 @@ func (e *InsertExec) batchUpdateDupRows(ctx context.Context, newRows [][]types.D
 				return err
 			}
 		}
-
+		// 如果主键没有冲突，那么判断唯一键是否有冲突
 		for _, uk := range r.uniqueKeys {
 			val, err := txn.Get(ctx, uk.newKey)
 			if err != nil {
@@ -278,6 +282,7 @@ func (e *InsertExec) batchUpdateDupRows(ctx context.Context, newRows [][]types.D
 		// we should do insert the row,
 		// and key-values should be filled back to dupOldRowValues for the further row check,
 		// due to there may be duplicate keys inside the insert statement.
+		// 如果主键和唯一键都没有冲突，那么执行正常插入逻辑
 		if newRows[i] != nil {
 			err := e.addRecord(ctx, newRows[i])
 			if err != nil {
@@ -369,6 +374,8 @@ func (e *InsertExec) doDupRowUpdate(ctx context.Context, handle kv.Handle, oldRo
 	// NOTE: In order to execute the expression inside the column assignment,
 	// we have to put the value of "oldRow" before "newRow" in "row4Update" to
 	// be consistent with "Schema4OnDuplicate" in the "Insert" PhysicalPlan.
+	// 将新旧数据全部都加入到 row4Update 中，因为可能新数据依赖于老数据
+	// 类似： ON DUPLICATE KEY UPDATE b = b+1
 	e.row4Update = e.row4Update[:0]
 	e.row4Update = append(e.row4Update, oldRow...)
 	e.row4Update = append(e.row4Update, newRow...)
@@ -385,6 +392,7 @@ func (e *InsertExec) doDupRowUpdate(ctx context.Context, handle kv.Handle, oldRo
 			return err1
 		}
 		e.evalBuffer4Dup.SetDatum(col.Col.Index, e.row4Update[col.Col.Index])
+		// 设置被ON DUPLICATE更新的字段
 		assignFlag[col.Col.Index] = true
 	}
 

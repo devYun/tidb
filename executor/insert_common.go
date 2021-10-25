@@ -1032,11 +1032,12 @@ func (e *InsertValues) batchCheckAndInsert(ctx context.Context, rows [][]types.D
 	}
 	start := time.Now()
 	// Get keys need to be checked.
+	// 获取行数据中需要校验的key，如主键，唯一键
 	toBeCheckedRows, err := getKeysNeedCheck(ctx, e.ctx, e.Table, rows)
 	if err != nil {
 		return err
 	}
-
+	// 获取事务处理器
 	txn, err := e.ctx.Txn(true)
 	if err != nil {
 		return err
@@ -1049,6 +1050,7 @@ func (e *InsertValues) batchCheckAndInsert(ctx context.Context, rows [][]types.D
 	}
 	prefetchStart := time.Now()
 	// Fill cache using BatchGet, the following Get requests don't need to visit TiKV.
+	// 批量从 tikv 中根据传入的 key 获取数据，存入到缓存中
 	if _, err = prefetchUniqueIndices(ctx, txn, toBeCheckedRows); err != nil {
 		return err
 	}
@@ -1062,7 +1064,9 @@ func (e *InsertValues) batchCheckAndInsert(ctx context.Context, rows [][]types.D
 			continue
 		}
 		skip := false
+		//判断主键
 		if r.handleKey != nil {
+			// 从缓存中判断key是否存在，存在则重复
 			_, err := txn.Get(ctx, r.handleKey.newKey)
 			if err == nil {
 				e.ctx.GetSessionVars().StmtCtx.AppendWarning(r.handleKey.dupErr)
@@ -1072,7 +1076,9 @@ func (e *InsertValues) batchCheckAndInsert(ctx context.Context, rows [][]types.D
 				return err
 			}
 		}
+		//判断唯一键
 		for _, uk := range r.uniqueKeys {
+			// 从缓存中判断key是否存在，存在则重复
 			_, err := txn.Get(ctx, uk.newKey)
 			if err == nil {
 				// If duplicate keys were found in BatchGet, mark row = nil.
@@ -1088,6 +1094,7 @@ func (e *InsertValues) batchCheckAndInsert(ctx context.Context, rows [][]types.D
 		// If row was checked with no duplicate keys,
 		// it should be add to values map for the further row check.
 		// There may be duplicate keys inside the insert statement.
+		// 没有冲突，调用 addRecord 添加数据
 		if !skip {
 			e.ctx.GetSessionVars().StmtCtx.AddCopiedRows(1)
 			err = addRecord(ctx, rows[i])

@@ -1515,7 +1515,9 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 	if err := s.validateStatementReadOnlyInStaleness(stmtNode); err != nil {
 		return nil, err
 	}
-
+	if strings.Contains(normalizedSQL, "test_insert") {
+		fmt.Println(normalizedSQL)
+	}
 	// Uncorrelated subqueries will execute once when building plan, so we reset process info before building plan.
 	cmd32 := atomic.LoadUint32(&s.GetSessionVars().CommandValue)
 	s.SetProcessInfo(stmtNode.Text(), time.Now(), byte(cmd32), 0)
@@ -1544,7 +1546,7 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 		sessionExecuteCompileDurationGeneral.Observe(durCompile.Seconds())
 	}
 	s.currentPlan = stmt.Plan
-	if strings.Contains(stmt.Text, "student") {
+	if strings.Contains(stmt.Text, "test_insert") {
 		toString := plannercore.ToString(stmt.Plan)
 		fmt.Println(toString)
 	}
@@ -1667,6 +1669,9 @@ func runStmt(ctx context.Context, se *session, s sqlexec.Statement) (rs sqlexec.
 			sql:       s,
 			se:        se,
 		}, err
+	}
+	if strings.Contains(s.OriginText(), "test_insert") {
+		fmt.Println(s)
 	}
 	//在执行完语句后，检查是否该提交了
 	err = finishStmt(ctx, se, err, s)
@@ -1985,6 +1990,7 @@ func (s *session) Txn(active bool) (kv.Transaction, error) {
 		// Transaction is lazy initialized.
 		// PrepareTxnCtx is called to get a tso future, makes s.txn a pending txn,
 		// If Txn() is called later, wait for the future to get a valid txn.
+		// 这里会获取到调用事务的begin
 		if err := s.txn.changePendingToValid(s.currentCtx); err != nil {
 			logutil.BgLogger().Error("active transaction fail",
 				zap.Error(err))
@@ -2049,6 +2055,7 @@ func (s *session) NewTxn(ctx context.Context) error {
 	if err := s.checkBeforeNewTxn(ctx); err != nil {
 		return err
 	}
+	// 开启事务
 	txn, err := s.store.BeginWithOption(tikv.DefaultStartTSOption().SetTxnScope(s.sessionVars.CheckAndGetTxnScope()))
 	if err != nil {
 		return err

@@ -60,13 +60,16 @@ func HandleCopRequest(dbReader *dbreader.DBReader, lockStore *lockstore.MemStore
 // I have to rename it to HandleCopRequestWithMPPCtx.
 func HandleCopRequestWithMPPCtx(dbReader *dbreader.DBReader, lockStore *lockstore.MemStore, req *coprocessor.Request, mppCtx *MPPCtx) *coprocessor.Response {
 	switch req.Tp {
+	//执行物理算子，为 SQL 计算出中间结果
 	case kv.ReqTypeDAG:
 		if mppCtx != nil && mppCtx.TaskHandler != nil {
 			return HandleMPPDAGReq(dbReader, req, mppCtx)
 		}
 		return handleCopDAGRequest(dbReader, lockStore, req)
+	//	Analyze：分析表数据，统计、采样表数据信息
 	case kv.ReqTypeAnalyze:
 		return handleCopAnalyzeRequest(dbReader, req)
+	//	CheckSum：对表数据进行校验，用于导入数据后一致性校验
 	case kv.ReqTypeChecksum:
 		return handleCopChecksumRequest(dbReader, req)
 	}

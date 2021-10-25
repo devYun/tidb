@@ -331,6 +331,8 @@ func (c *twoPhaseCommitter) initKeysAndMutations() error {
 	var size, putCnt, delCnt, lockCnt, checkCnt int
 
 	txn := c.txn
+	// 当前事务的数据都存放在 memBuf 中
+	// memBuffer里的 key 是有序排列
 	memBuf := txn.GetMemBuffer()
 	sizeHint := txn.us.GetMemBuffer().Len()
 	c.mutations = newMemBufferMutations(sizeHint, memBuf)
@@ -338,6 +340,7 @@ func (c *twoPhaseCommitter) initKeysAndMutations() error {
 	filter := txn.kvFilter
 
 	var err error
+	// 遍历 memBuffer 可以顺序的收集到事务里需要修改的 key
 	for it := memBuf.IterWithFlags(nil, nil); it.Valid(); err = it.Next() {
 		_ = err
 		key := it.Key()
@@ -432,6 +435,7 @@ func (c *twoPhaseCommitter) initKeysAndMutations() error {
 	metrics.TiKVTxnWriteKVCountHistogram.Observe(float64(commitDetail.WriteKeys))
 	metrics.TiKVTxnWriteSizeHistogram.Observe(float64(commitDetail.WriteSize))
 	c.hasNoNeedCommitKeys = checkCnt > 0
+	//计算事务的 TTL 时间
 	c.lockTTL = txnLockTTL(txn.startTime, size)
 	c.priority = txn.priority.ToPB()
 	c.syncLog = txn.syncLog
@@ -468,12 +472,16 @@ func txnLockTTL(startTime time.Time, txnSize int) uint64 {
 	// When writeSize is less than 256KB, the base ttl is defaultTTL (3s);
 	// When writeSize is 1MiB, 4MiB, or 10MiB, ttl is 6s, 12s, 20s correspondingly;
 	lockTTL := defaultLockTTL
+	// 当事务大小大于16KB
 	if txnSize >= txnCommitBatchSize {
 		sizeMiB := float64(txnSize) / bytesPerMiB
+		// 6000 * 事务大小平方根
 		lockTTL = uint64(float64(ttlFactor) * math.Sqrt(sizeMiB))
+		//最小为3s
 		if lockTTL < defaultLockTTL {
 			lockTTL = defaultLockTTL
 		}
+		//最大为20s
 		if lockTTL > ManagedLockTTL {
 			lockTTL = ManagedLockTTL
 		}
@@ -496,6 +504,7 @@ func (c *twoPhaseCommitter) doActionOnMutations(bo *Backoffer, action twoPhaseCo
 	if mutations.Len() == 0 {
 		return nil
 	}
+	//按照region分组对mutations进行分组
 	groups, err := c.groupMutations(bo, mutations)
 	if err != nil {
 		return errors.Trace(err)
@@ -504,12 +513,13 @@ func (c *twoPhaseCommitter) doActionOnMutations(bo *Backoffer, action twoPhaseCo
 	// This is redundant since `doActionOnGroupMutations` will still split groups into batches and
 	// check the number of batches. However we don't want the check fail after any code changes.
 	c.checkOnePCFallBack(action, len(groups))
-
+	//进一步的分批处理
 	return c.doActionOnGroupMutations(bo, action, groups)
 }
 
 // groupMutations groups mutations by region, then checks for any large groups and in that case pre-splits the region.
 func (c *twoPhaseCommitter) groupMutations(bo *Backoffer, mutations CommitterMutations) ([]groupedMutations, error) {
+	//先对mutations按照region分组
 	groups, err := c.store.regionCache.groupSortedMutationsByRegion(bo, mutations)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -520,6 +530,8 @@ func (c *twoPhaseCommitter) groupMutations(bo *Backoffer, mutations CommitterMut
 	var didPreSplit bool
 	preSplitDetectThresholdVal := atomic.LoadUint32(&preSplitDetectThreshold)
 	for _, group := range groups {
+		// Threshold是100000，如果某个region的mutations数值超过这个数
+		// 则会先发送CmdSplitRegion命令给TiKV, TiKV对那个region先做个split
 		if uint32(group.mutations.Len()) >= preSplitDetectThresholdVal {
 			logutil.BgLogger().Info("2PC detect large amount of mutations on a single region",
 				zap.Uint64("region", group.region.GetID()),
@@ -530,6 +542,7 @@ func (c *twoPhaseCommitter) groupMutations(bo *Backoffer, mutations CommitterMut
 		}
 	}
 	// Reload region cache again.
+	// split完毕之后再对mutations按照region分组
 	if didPreSplit {
 		groups, err = c.store.regionCache.groupSortedMutationsByRegion(bo, mutations)
 		if err != nil {
@@ -564,6 +577,7 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPh
 	}
 
 	batchBuilder := newBatched(c.primary())
+	//每个分组内按16KB大小再分批
 	for _, group := range groups {
 		batchBuilder.appendBatchMutationsBySize(group.region, group.mutations, sizeFunc, txnCommitBatchSize)
 	}
@@ -599,7 +613,7 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPh
 			failpoint.Return(nil)
 		}
 	})
-
+	//commit先同步的提交primary key所在的batch
 	if firstIsPrimary &&
 		((actionIsCommit && !c.isAsyncCommit()) || actionIsCleanup || actionIsPessimiticLock) {
 		// primary should be committed(not async commit)/cleanup/pessimistically locked first
@@ -611,9 +625,11 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPh
 			c.testingKnobs.acAfterCommitPrimary <- struct{}{}
 			<-c.testingKnobs.bkAfterCommitPrimary
 		}
+		//提交完之后将primary key所在的batch移除
 		batchBuilder.forgetPrimary()
 	}
 	// Already spawned a goroutine for async commit transaction.
+	// 其它的key由go routine后台异步的提交
 	if actionIsCommit && !actionCommit.retry && !c.isAsyncCommit() {
 		secondaryBo := retry.NewBackofferWithVars(context.Background(), CommitSecondaryMaxBackoff, c.txn.vars)
 		go func() {
@@ -641,6 +657,7 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPh
 			}
 		}()
 	} else {
+		//执行 prewrite
 		err = c.doActionOnBatches(bo, action, batchBuilder.allBatches())
 	}
 	return errors.Trace(err)

@@ -358,6 +358,7 @@ func (c *RPCClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 	enableBatch := req.StoreTp != tikvrpc.TiDB && req.StoreTp != tikvrpc.TiFlash
 	c.recycleMu.RLock()
 	defer c.recycleMu.RUnlock()
+	// 根据 addr 获取链接列表，获取不到会创建
 	connArray, err := c.getConnArray(addr, enableBatch)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -371,7 +372,7 @@ func (c *RPCClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 			return sendBatchRequest(ctx, addr, req.ForwardedHost, connArray.batchConn, batchReq, timeout)
 		}
 	}
-
+	// 这里会轮询在链接列表里面获取一个
 	clientConn := connArray.Get()
 	if state := clientConn.GetState(); state == connectivity.TransientFailure {
 		storeID := strconv.FormatUint(req.Context.GetPeer().GetStoreId(), 10)
@@ -384,7 +385,7 @@ func (c *RPCClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 		defer cancel()
 		return tikvrpc.CallDebugRPC(ctx1, client, req)
 	}
-
+	//获取grpc client
 	client := tikvpb.NewTikvClient(clientConn)
 
 	// Set metadata for request forwarding. Needn't forward DebugReq.

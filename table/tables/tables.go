@@ -19,6 +19,7 @@ package tables
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -388,7 +389,7 @@ func (t *TableCommon) UpdateRecord(ctx context.Context, sctx sessionctx.Context,
 		if !sessVars.ConstraintCheckInPlace && sessVars.TxnCtx.IsPessimistic {
 			sessVars.PresumeKeyNotExists = true
 		}
-		err = t.rebuildIndices(sctx, txn, h, touched, oldData, newData, table.WithCtx(ctx))
+		err = t.rebuildIndices(sctx, txn, h, touched, oldData, newData, table.WithCtx(ctx)) // 重建索引记录
 		sessVars.PresumeKeyNotExists = savePresumeKeyNotExist
 		if err != nil {
 			return err
@@ -399,14 +400,14 @@ func (t *TableCommon) UpdateRecord(ctx context.Context, sctx sessionctx.Context,
 			return err
 		}
 	}
-
+	// 构建行记录key
 	key := t.RecordKey(h)
 	sc, rd := sessVars.StmtCtx, &sessVars.RowEncoder
-	value, err := tablecodec.EncodeRow(sc, row, colIDs, nil, nil, rd)
+	value, err := tablecodec.EncodeRow(sc, row, colIDs, nil, nil, rd) // 构建行记录value
 	if err != nil {
 		return err
 	}
-	if err = memBuffer.Set(key, value); err != nil {
+	if err = memBuffer.Set(key, value); err != nil { // 将数据添加到事务缓存中
 		return err
 	}
 	memBuffer.Release(sh)
@@ -622,6 +623,10 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 	} else {
 		ctx = context.Background()
 	}
+	s := t.Meta().Name.String()
+	if strings.Contains(s, "test_insert") {
+		fmt.Println(s)
+	}
 	var hasRecordID bool
 	cols := t.Cols()
 	// opt.IsUpdate is a flag for update.
@@ -736,21 +741,25 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 
 	writeBufs := sessVars.GetWriteStmtBufs()
 	adjustRowValuesBuf(writeBufs, len(row))
+	// 构造行记录key
 	key := t.RecordKey(recordID)
 	logutil.BgLogger().Debug("addRecord",
 		zap.Stringer("key", key))
 	sc, rd := sessVars.StmtCtx, &sessVars.RowEncoder
+	// 将行数据序列化
 	writeBufs.RowValBuf, err = tablecodec.EncodeRow(sc, row, colIDs, writeBufs.RowValBuf, writeBufs.AddRowValues, rd)
 	if err != nil {
 		return nil, err
 	}
 	value := writeBufs.RowValBuf
-
+	// 检测该key在本地缓存中是否存在
 	var setPresume bool
 	skipCheck := sctx.GetSessionVars().StmtCtx.BatchCheck
 	if (t.meta.IsCommonHandle || t.meta.PKIsHandle) && !skipCheck && !opt.SkipHandleCheck {
+		// 如果是 LazyCheck ，那么只读取本地缓存判断是否存在
 		if sctx.GetSessionVars().LazyCheckKeyNotExists() {
 			var v []byte
+			//只读取本地缓存判断是否存在
 			v, err = txn.GetMemBuffer().Get(ctx, key)
 			if err != nil {
 				setPresume = true
@@ -759,6 +768,7 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 				err = kv.ErrNotExist
 			}
 		} else {
+			//否则会通过rpc请求tikv从集群中校验数据是否存在
 			_, err = txn.Get(ctx, key)
 		}
 		if err == nil {
@@ -768,8 +778,9 @@ func (t *TableCommon) AddRecord(sctx sessionctx.Context, r []types.Datum, opts .
 			return recordID, err
 		}
 	}
-
+	//将 Key-Value 写到当前事务的缓存中
 	if setPresume {
+		// 表示假定数据不存在
 		err = memBuffer.SetWithFlags(key, value, kv.SetPresumeKeyNotExists)
 	} else {
 		err = memBuffer.Set(key, value)
@@ -849,17 +860,20 @@ func (t *TableCommon) addIndices(sctx sessionctx.Context, recordID kv.Handle, r 
 		if t.meta.IsCommonHandle && v.Meta().Primary {
 			continue
 		}
+		//获取索引值
 		indexVals, err := v.FetchValues(r, indexVals)
 		if err != nil {
 			return nil, err
 		}
 		var dupErr error
+		// 唯一键校验是否重复
 		if !skipCheck && v.Meta().Unique {
 			entryKey, err := genIndexKeyStr(indexVals)
 			if err != nil {
 				return nil, err
 			}
 			idxMeta := v.Meta()
+			// 构造键重复错误
 			dupErr = kv.ErrKeyExists.FastGenByArgs(entryKey, idxMeta.Name.String())
 		}
 		rsData := TryGetHandleRestoredDataWrapper(t, r, nil, v.Meta())
