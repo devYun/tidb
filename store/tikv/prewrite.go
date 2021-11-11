@@ -303,13 +303,14 @@ func (action actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoff
 			locks = append(locks, lock)
 		}
 		start := time.Now()
-		//尝试解决这些locks
+		//尝试解决这些locks，获取锁的过期时间
 		msBeforeExpired, err := c.store.lockResolver.resolveLocksForWrite(bo, c.startTS, locks)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		atomic.AddInt64(&c.getDetail().ResolveLockTime, int64(time.Since(start)))
 		if msBeforeExpired > 0 {
+			// 过期时间大于0，那么sleep等待
 			err = bo.BackoffWithCfgAndMaxSleep(retry.BoTxnLock, int(msBeforeExpired), errors.Errorf("2PC prewrite lockedKeys: %d", len(locks)))
 			if err != nil {
 				return errors.Trace(err)

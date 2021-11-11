@@ -366,6 +366,7 @@ func (d *rangeDetacher) buildCNFIndexRange(newTp []*types.FieldType,
 	rangePoints := getFullRange()
 	// Build rangePoints for non-equal access conditions.
 	for i := eqAndInCount; i < len(accessCondition); i++ {
+		//区间交
 		rangePoints = rb.intersection(rangePoints, rb.build(accessCondition[i]))
 		if rb.err != nil {
 			return nil, errors.Trace(rb.err)
@@ -383,6 +384,7 @@ func (d *rangeDetacher) buildCNFIndexRange(newTp []*types.FieldType,
 	// Take prefix index into consideration.
 	if hasPrefix(d.lengths) {
 		if fixPrefixColRange(ranges, d.lengths, newTp) {
+			//区间并
 			ranges, err = UnionRanges(sc, ranges, d.mergeConsecutive)
 			if err != nil {
 				return nil, errors.Trace(err)

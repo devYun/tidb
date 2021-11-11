@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
@@ -184,6 +185,9 @@ type builder struct {
 }
 
 func (r *builder) build(expr expression.Expression) []*point {
+	if strings.Contains(r.sc.OriginalSQL, "test1") {
+		fmt.Println(r.sc.OriginalSQL)
+	}
 	switch x := expr.(type) {
 	case *expression.Column:
 		return r.buildFromColumn(x)
@@ -320,12 +324,12 @@ func (r *builder) buildFormBinOp(expr *expression.ScalarFunction) []*point {
 		// col = an impossible value (not valid year)
 		return nil
 	}
-
+	//处理unsigned列
 	value, op, isValidRange := handleUnsignedCol(ft, value, op)
 	if !isValidRange {
 		return nil
 	}
-
+	// 处理越界情况
 	value, op, isValidRange = handleBoundCol(ft, value, op)
 	if !isValidRange {
 		return nil

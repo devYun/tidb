@@ -118,7 +118,9 @@ func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 			return fp, fp.OutputNames(), nil
 		}
 	}
-
+	if strings.Contains(node.Text(), "test_pushdown") {
+		fmt.Println(node.Text())
+	}
 	sctx.PrepareTSFuture(ctx)
 	// 逻辑优化
 	bestPlan, names, _, err := optimize(ctx, sctx, node, is)
@@ -285,7 +287,9 @@ func optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 		finalPlan, cost, err := cascades.DefaultOptimizer.FindBestPlan(sctx, logic)
 		return finalPlan, names, cost, err
 	}
-
+	if strings.Contains(node.Text(), "test1") {
+		fmt.Println(node.Text())
+	}
 	beginOpt := time.Now()
 	//  logical plan & physical plan
 	finalPlan, cost, err := plannercore.DoOptimize(ctx, sctx, builder.GetOptFlag(), logic)

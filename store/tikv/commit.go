@@ -60,7 +60,7 @@ func (actionCommit) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch
 			logutil.BgLogger().Warn("slow commit request", zap.Uint64("startTS", c.startTS), zap.Stringer("region", &batch.region), zap.Int("attempts", attempts))
 			tBegin = time.Now()
 		}
-
+		//向 tikv 发起提交请求
 		resp, err := sender.SendReq(bo, req, batch.region, client.ReadTimeoutShort)
 		// If we fail to receive response for the request that commits primary key, it will be undetermined whether this
 		// transaction has been successfully committed.

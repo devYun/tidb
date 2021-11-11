@@ -1515,7 +1515,7 @@ func (s *session) ExecuteStmt(ctx context.Context, stmtNode ast.StmtNode) (sqlex
 	if err := s.validateStatementReadOnlyInStaleness(stmtNode); err != nil {
 		return nil, err
 	}
-	if strings.Contains(normalizedSQL, "test_insert") {
+	if strings.Contains(normalizedSQL, "test_pushdown") {
 		fmt.Println(normalizedSQL)
 	}
 	// Uncorrelated subqueries will execute once when building plan, so we reset process info before building plan.

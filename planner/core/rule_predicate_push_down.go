@@ -14,6 +14,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/mysql"
@@ -107,6 +108,9 @@ func (p *LogicalUnionScan) PredicatePushDown(predicates []expression.Expression)
 
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
 func (ds *DataSource) PredicatePushDown(predicates []expression.Expression) ([]expression.Expression, LogicalPlan) {
+	if ds.table.Meta().Name.O == "test_pushdown" {
+		fmt.Println(ds.table.Meta().Name.O)
+	}
 	predicates = expression.PropagateConstant(ds.ctx, predicates)
 	predicates = DeleteTrueExprs(ds, predicates)
 	ds.allConds = predicates

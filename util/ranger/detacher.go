@@ -14,7 +14,9 @@
 package ranger
 
 import (
+	"fmt"
 	"math"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
@@ -545,12 +547,14 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 		length:        d.lengths[0],
 	}
 	rb := builder{sc: sc}
+	// 递归提炼出 or 子项
 	dnfItems := expression.FlattenDNFConditions(condition)
 	newAccessItems := make([]expression.Expression, 0, len(dnfItems))
 	var totalRanges []*Range
 	hasResidual := false
 	for _, item := range dnfItems {
 		if sf, ok := item.(*expression.ScalarFunction); ok && sf.FuncName.L == ast.LogicAnd {
+			// 递归提炼出 and 子项
 			cnfItems := expression.FlattenCNFConditions(sf)
 			var accesses, filters []expression.Expression
 			res, err := d.detachCNFCondAndBuildRangeForIndex(cnfItems, newTpSlice, true)
@@ -568,6 +572,10 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 			}
 			totalRanges = append(totalRanges, ranges...)
 			newAccessItems = append(newAccessItems, expression.ComposeCNFCondition(d.sctx, accesses...))
+			//	校验对应的表达式是否是索引列
+			// 如表： CREATE TABLE test1 (a int primary key, b int, c int,index (b));
+			// 在查询 select * from test1 where c=5 or ( b>5 and (b>6 or b <8)  and b<12) 时，遍历到 c=5，由于c不是索引
+			// 所以 check 函数返回 false
 		} else if firstColumnChecker.check(item) {
 			if firstColumnChecker.shouldReserve {
 				hasResidual = true
@@ -589,6 +597,7 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 	if hasPrefix(d.lengths) {
 		fixPrefixColRange(totalRanges, d.lengths, newTpSlice)
 	}
+	// 区间并
 	totalRanges, err := UnionRanges(sc, totalRanges, d.mergeConsecutive)
 	if err != nil {
 		return nil, nil, false, errors.Trace(err)
@@ -617,6 +626,9 @@ type DetachRangeResult struct {
 // The returned values are encapsulated into a struct DetachRangeResult, see its comments for explanation.
 func DetachCondAndBuildRangeForIndex(sctx sessionctx.Context, conditions []expression.Expression, cols []*expression.Column,
 	lengths []int) (*DetachRangeResult, error) {
+	if strings.Contains(cols[0].OrigName, "test.test1") {
+		fmt.Println("test.test1")
+	}
 	d := &rangeDetacher{
 		sctx:             sctx,
 		allConds:         conditions,
