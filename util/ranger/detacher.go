@@ -219,7 +219,7 @@ func extractIndexPointRangesForCNF(sctx sessionctx.Context, conds []expression.E
 		sameLens, allPoints := true, true
 		numCols := int(0)
 		for i, ran := range res.Ranges {
-			if !ran.IsPoint(sctx.GetSessionVars().StmtCtx) {
+			if !ran.IsPoint(sctx.GetSessionVars().StmtCtx) { //检查是否是一个等值查询
 				allPoints = false
 				break
 			}
@@ -254,8 +254,12 @@ func (d *rangeDetacher) detachCNFCondAndBuildRangeForIndex(conditions []expressi
 		ranges  []*Range
 		err     error
 	)
+	if strings.Contains(d.cols[0].OrigName, "test.test1") {
+		fmt.Println("test.test1")
+	}
 	res := &DetachRangeResult{}
-
+	// accessConds 用于抽出 eq/in 可以用于点查的条件构建范围查询
+	// newConditions 用来简化同字段出现多次的 eq 或 in 条件的情况，如：a in (1, 2, 3) and a in (2, 3, 4) 被简化为 a in (2, 3)
 	accessConds, filterConds, newConditions, emptyRange := ExtractEqAndInCondition(d.sctx, conditions, d.cols, d.lengths)
 	if emptyRange {
 		return res, nil
@@ -268,6 +272,7 @@ func (d *rangeDetacher) detachCNFCondAndBuildRangeForIndex(conditions []expressi
 	eqOrInCount := len(accessConds)
 	res.EqCondCount = eqCount
 	res.EqOrInCount = eqOrInCount
+	// 根据access构建范围区间，如果没有accessConds，那么range为FullRange
 	ranges, err = d.buildCNFIndexRange(tpSlice, eqOrInCount, accessConds)
 	if err != nil {
 		return res, err
@@ -285,7 +290,7 @@ func (d *rangeDetacher) detachCNFCondAndBuildRangeForIndex(conditions []expressi
 		shouldReserve: d.lengths[eqOrInCount] != types.UnspecifiedLength,
 	}
 	if considerDNF {
-		pointRes, offset, err := extractIndexPointRangesForCNF(d.sctx, conditions, d.cols, d.lengths)
+		pointRes, offset, err := extractIndexPointRangesForCNF(d.sctx, conditions, d.cols, d.lengths) //提出取点查询范围
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +337,10 @@ func (d *rangeDetacher) detachCNFCondAndBuildRangeForIndex(conditions []expressi
 			return res, nil
 		}
 		// `eqOrInCount` must be 0 when coming here.
+		// 遍历所有 conditions ，如果该condition是LogicOr Scalar Function类型的，则调用 DNF 相关函数进行处理
+		// 这里只会处理单列的数据，由 checker 的 colUniqueID 决定
 		res.AccessConds, res.RemainedConds = detachColumnCNFConditions(d.sctx, newConditions, checker)
+		// 获取 AccessConds 的范围 range
 		ranges, err = d.buildCNFIndexRange(tpSlice, 0, res.AccessConds)
 		if err != nil {
 			return nil, err
@@ -449,8 +457,8 @@ func allEqOrIn(expr expression.Expression) bool {
 }
 
 // ExtractEqAndInCondition will split the given condition into three parts by the information of index columns and their lengths.
-// accesses: The condition will be used to build range.
-// filters: filters is the part that some access conditions need to be evaluate again since it's only the prefix part of char column.
+// accesses: The condition will be used to build range. 是用于范围的构建
+// filters: filters is the part that some access conditions need to be evaluate again since it's only the prefix part of char column. 需要再次被计算的条件
 // newConditions: We'll simplify the given conditions if there're multiple in conditions or eq conditions on the same column.
 //   e.g. if there're a in (1, 2, 3) and a in (2, 3, 4). This two will be combined to a in (2, 3) and pushed to newConditions.
 // bool: indicate whether there's nil range when merging eq and in conditions.
@@ -547,14 +555,15 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 		length:        d.lengths[0],
 	}
 	rb := builder{sc: sc}
-	// 递归提炼出 or 子项
+	// 递归拉平 or 子项 Expression
 	dnfItems := expression.FlattenDNFConditions(condition)
 	newAccessItems := make([]expression.Expression, 0, len(dnfItems))
 	var totalRanges []*Range
 	hasResidual := false
 	for _, item := range dnfItems {
+		// 如果该子项 Expression 包含了 AND
 		if sf, ok := item.(*expression.ScalarFunction); ok && sf.FuncName.L == ast.LogicAnd {
-			// 递归提炼出 and 子项
+			// 递归拉平 and 子项 Expression
 			cnfItems := expression.FlattenCNFConditions(sf)
 			var accesses, filters []expression.Expression
 			res, err := d.detachCNFCondAndBuildRangeForIndex(cnfItems, newTpSlice, true)
@@ -572,7 +581,7 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 			}
 			totalRanges = append(totalRanges, ranges...)
 			newAccessItems = append(newAccessItems, expression.ComposeCNFCondition(d.sctx, accesses...))
-			//	校验对应的表达式是否是索引列
+			// 校验对应的表达式是否是索引/主键/唯一键/分区列
 			// 如表： CREATE TABLE test1 (a int primary key, b int, c int,index (b));
 			// 在查询 select * from test1 where c=5 or ( b>5 and (b>6 or b <8)  and b<12) 时，遍历到 c=5，由于c不是索引
 			// 所以 check 函数返回 false
@@ -581,7 +590,9 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 				hasResidual = true
 				firstColumnChecker.shouldReserve = d.lengths[0] != types.UnspecifiedLength
 			}
+			// 计算逻辑区间
 			points := rb.build(item)
+			// 将区间转化为外暴露的 range 结构
 			ranges, err := points2Ranges(sc, points, newTpSlice[0])
 			if err != nil {
 				return nil, nil, false, errors.Trace(err)
@@ -589,6 +600,7 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 			totalRanges = append(totalRanges, ranges...)
 			newAccessItems = append(newAccessItems, item)
 		} else {
+			//生成 [null, +∞) 区间
 			return FullRange(), nil, true, nil
 		}
 	}
@@ -598,6 +610,8 @@ func (d *rangeDetacher) detachDNFCondAndBuildRangeForIndex(condition *expression
 		fixPrefixColRange(totalRanges, d.lengths, newTpSlice)
 	}
 	// 区间并
+	// 例如区间：[a, b], [c, d],表示的是a <= c. If b >= c
+	// 那么这两个区间可以合并为：[a, max(b, d)].
 	totalRanges, err := UnionRanges(sc, totalRanges, d.mergeConsecutive)
 	if err != nil {
 		return nil, nil, false, errors.Trace(err)

@@ -118,7 +118,7 @@ func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is in
 			return fp, fp.OutputNames(), nil
 		}
 	}
-	if strings.Contains(node.Text(), "test_pushdown") {
+	if strings.Contains(node.Text(), "test1") {
 		fmt.Println(node.Text())
 	}
 	sctx.PrepareTSFuture(ctx)

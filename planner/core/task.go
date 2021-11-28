@@ -936,7 +936,7 @@ func (t *copTask) convertToRootTaskImpl(ctx sessionctx.Context) *rootTask {
 	// is Min(DistSQLScanConcurrency, numRegionsInvolvedInScan), since we cannot infer
 	// the number of regions involved, we simply use DistSQLScanConcurrency.
 	copIterWorkers := float64(t.plan().SCtx().GetSessionVars().DistSQLScanConcurrency())
-	t.finishIndexPlan()
+	t.finishIndexPlan() //计算网络开销
 	needExtraProj := false
 	var prevSchema *expression.Schema
 	// Network cost of transferring rows of table scan to TiDB.

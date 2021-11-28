@@ -315,7 +315,7 @@ func (r *builder) buildFormBinOp(expr *expression.ScalarFunction) []*point {
 	if op != ast.NullEQ && value.IsNull() {
 		return nil
 	}
-	err = refineValueAndOp(col, &value, &op)
+	err = refineValueAndOp(col, &value, &op) //特殊类型的处理
 	if err != nil {
 		if op == ast.NE {
 			// col != an impossible value (not valid year)
